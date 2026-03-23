@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Tauri build output (Rust side handled in src-tauri/.gitignore)
+src-tauri/target/
+src-tauri/gen/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

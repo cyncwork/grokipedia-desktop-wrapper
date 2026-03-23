@@ -1,0 +1,20 @@
+[package]
+name = "grokipedia"
+version = "0.1.0"
+description = "Grokipedia Desktop — a native tabbed browser for grokipedia.com"
+authors = ["pn"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "grokipedia_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.10.3", features = ["unstable"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.32", features = ["bundled"] }

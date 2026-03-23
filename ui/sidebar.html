@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grokipedia — Panel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="sidebar-root">
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-panel="bookmarks">Bookmarks</button>
+      <button class="sidebar-tab"        data-panel="history">History</button>
+    </div>
+
+    <div id="panel-bookmarks" class="panel">
+      <div class="panel-toolbar">
+        <span class="panel-label">Bookmarks</span>
+      </div>
+      <ul id="bookmark-list"></ul>
+    </div>
+
+    <div id="panel-history" class="panel hidden">
+      <div class="panel-toolbar">
+        <span class="panel-label">History</span>
+        <button id="btn-clear-history" class="text-btn">Clear</button>
+      </div>
+      <ul id="history-list"></ul>
+    </div>
+  </div>
+  <script src="sidebar.js"></script>
+</body>
+</html>
