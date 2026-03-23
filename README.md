@@ -10,7 +10,7 @@ A native macOS desktop app for [grokipedia.com](https://grokipedia.com) — xAI'
 
 ## Architecture
 
-The main window is a `WebviewWindow` whose own webview loads the chrome UI (`index.html`). On macOS, the title bar uses `TitleBarStyle::Overlay` so the chrome sits directly in the title bar area — a single compact 40 px row with tabs, navigation buttons, bookmark, and sidebar toggle.
+The main window is a `WebviewWindow` whose own webview loads the chrome UI (`index.html`). *Chrome* is the UI design term for the app's own controls (tabs, buttons, toolbars) as distinct from the website content. On macOS, the title bar uses `TitleBarStyle::Overlay` so the chrome sits directly in the title bar area — a single compact 40 px row with tabs, navigation buttons, bookmark, and sidebar toggle.
 
 Content tabs are child `Webview`s (Tauri 2 `unstable` feature) layered on top of the main webview, positioned below the chrome. All content webviews share the same WebKit data store, so cookies from `accounts.x.ai` persist across tabs automatically.
 

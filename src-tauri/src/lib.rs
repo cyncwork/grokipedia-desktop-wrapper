@@ -8,7 +8,8 @@ use tauri::{
     AppHandle, Emitter, Manager,
     WebviewUrl,
     LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size, Rect,
-    webview::{WebviewBuilder, PageLoadPayload, PageLoadEvent},
+    webview::{WebviewBuilder, PageLoadPayload, PageLoadEvent, NewWindowResponse},
+    window::WindowBuilder,
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
 };
 
@@ -68,6 +69,12 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 // ── Layout helper ─────────────────────────────────────────────────────────────
 
 fn do_layout(app: &AppHandle, w: f64, h: f64) {
+    if let Some(chrome) = app.get_webview("chrome") {
+        let _ = chrome.set_bounds(Rect {
+            position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
+            size:     Size::Logical(LogicalSize::new(w, CHROME_H)),
+        });
+    }
     if let Some(state) = app.try_state::<AppState>() {
         let tabs = state.tabs.lock().unwrap();
         for tab_id in tabs.keys() {
@@ -106,13 +113,61 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
 
     let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
     let tab_id_cb = tab_id.clone();
+    let tab_id_nav = tab_id.clone();
+    let app_nav = app.clone();
 
     let builder = WebviewBuilder::new(&tab_id, WebviewUrl::External(parsed))
+        // Use a real Safari UA so Cloudflare Turnstile and other bot
+        // detection don't reject the embedded WKWebView.
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15")
+        // Intercept user-clicked external links and open them in the
+        // system browser instead of navigating the tab away from grokipedia.
+        .initialization_script(r#"
+            document.addEventListener('click', function(e) {
+                var a = e.target.closest('a');
+                if (!a || !a.href) return;
+                try {
+                    var host = new URL(a.href).hostname;
+                    var ok = host === 'grokipedia.com'
+                          || host.endsWith('.grokipedia.com')
+                          || host === 'accounts.x.ai';
+                    if (!ok) {
+                        e.preventDefault();
+                        // Navigate to a sentinel URL that on_navigation will
+                        // intercept and open in the system browser.
+                        window.location.href = 'grokipedia-ext:' + a.href;
+                    }
+                } catch {}
+            }, true);
+        "#)
+        // Intercept new-window requests (window.open / OAuth popups):
+        // navigate the current webview instead of opening a popup.
+        .on_new_window(move |url, _features| {
+            if let Some(wv) = app_nav.get_webview(&tab_id_nav) {
+                let _ = wv.navigate(url);
+            }
+            NewWindowResponse::Deny
+        })
+        // Allow all navigation EXCEPT the sentinel scheme used by the
+        // click interceptor to signal "open in system browser".
+        .on_navigation(|url| {
+            if url.scheme() == "grokipedia-ext" {
+                let real_url = url.as_str().strip_prefix("grokipedia-ext:").unwrap_or("");
+                if !real_url.is_empty() {
+                    #[cfg(target_os = "macos")]
+                    { let _ = std::process::Command::new("open").arg(real_url).spawn(); }
+                    #[cfg(target_os = "linux")]
+                    { let _ = std::process::Command::new("xdg-open").arg(real_url).spawn(); }
+                }
+                return false;
+            }
+            true
+        })
         .on_page_load(move |webview: tauri::webview::Webview<tauri::Wry>, payload: PageLoadPayload<'_>| {
             if payload.event() == PageLoadEvent::Finished {
                 let url_str = payload.url().to_string();
                 let _ = webview.app_handle().emit_to(
-                    tauri::EventTarget::Webview { label: "main".into() },
+                    tauri::EventTarget::Webview { label: "chrome".into() },
                     "tab-navigated",
                     serde_json::json!({ "tabId": tab_id_cb, "url": url_str }),
                 );
@@ -340,15 +395,9 @@ pub fn run() {
             });
 
             // ── Main window ───────────────────────────────────────────────────
-            // index.html (chrome) is the window's own webview — it fills the
-            // window automatically, avoiding the child-webview DPI sizing bug.
-            // Overlay title bar lets our single-row chrome sit in the macOS
-            // title-bar area.
-            let mut win_builder = tauri::WebviewWindowBuilder::new(
-                app,
-                "main",
-                WebviewUrl::App("index.html".into()),
-            )
+            // Bare window (no webview of its own). Chrome and content tabs are
+            // non-overlapping child webviews — eliminates cursor flickering.
+            let mut win_builder = WindowBuilder::new(app, "main")
                 .title("Grokipedia")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(900.0, 600.0);
@@ -360,10 +409,34 @@ pub fn run() {
                     .hidden_title(true);
             }
 
-            win_builder.build()?;
+            let window = win_builder.build()?;
 
-            // ── Resize: keep content tab views fitted below the chrome ────────
-            let window = app.get_window("main").expect("main window");
+            // ── Chrome bar (CHROME_H px, fixed at top) ────────────────────────
+            // on_page_load nudges window size by 1 px to force a Resized event,
+            // ensuring do_layout runs with correct scale_factor() on Retina.
+            let init_phys  = window.inner_size().unwrap_or_default();
+            let init_scale = window.scale_factor().unwrap_or(1.0);
+            let phys_chrome = (CHROME_H * init_scale).round() as u32;
+
+            let app_handle_chrome = app.handle().clone();
+            window.add_child(
+                WebviewBuilder::new("chrome", WebviewUrl::App("index.html".into()))
+                    .on_page_load(move |_wv, payload| {
+                        if payload.event() == PageLoadEvent::Finished {
+                            if let Some(win) = app_handle_chrome.get_window("main") {
+                                let phys = win.inner_size().unwrap_or_default();
+                                let _ = win.set_size(PhysicalSize::new(
+                                    phys.width, phys.height + 1,
+                                ));
+                                let _ = win.set_size(phys);
+                            }
+                        }
+                    }),
+                PhysicalPosition::new(0_i32, 0_i32),
+                PhysicalSize::new(init_phys.width, phys_chrome),
+            )?;
+
+            // ── Resize: keep chrome + content views fitted ────────────────────
             let app_handle = app.handle().clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::Resized(phys) = event {
@@ -441,7 +514,7 @@ pub fn run() {
             app.set_menu(menu)?;
 
             app.on_menu_event(|app, event| {
-                let target = tauri::EventTarget::Webview { label: "main".into() };
+                let target = tauri::EventTarget::Webview { label: "chrome".into() };
                 let action = match event.id.0.as_str() {
                     "new-tab"      => "new-tab",
                     "close-tab"    => "close-tab",

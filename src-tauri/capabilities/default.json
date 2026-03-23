@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for Grokipedia chrome",
-  "windows": ["main", "sidebar"],
+  "windows": ["chrome", "sidebar"],
   "permissions": [
     "core:default"
   ]
