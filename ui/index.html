@@ -8,8 +8,8 @@
 </head>
 <body>
 
-  <!-- ── Tab bar ─────────────────────────────────────────────────────────── -->
-  <div id="tab-bar">
+  <!-- ── Single-row chrome in macOS title bar area ────────────────────────── -->
+  <div id="chrome-bar">
     <div class="tl-spacer"></div>
     <div id="tabs"></div>
     <button id="btn-new-tab" class="icon-btn" title="New tab (⌘T)">
@@ -18,36 +18,23 @@
         <line x1="3" y1="8" x2="13" y2="8"/>
       </svg>
     </button>
-  </div>
-
-  <!-- ── Nav bar ─────────────────────────────────────────────────────────── -->
-  <div id="nav-bar">
-    <button id="btn-back"    class="icon-btn" title="Back (⌘←)">
+    <div class="chrome-spacer"></div>
+    <button id="btn-back" class="icon-btn" title="Back (⌘[)">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
         <polyline points="10,3 4,8 10,13"/>
       </svg>
     </button>
-    <button id="btn-forward" class="icon-btn" title="Forward (⌘→)">
+    <button id="btn-forward" class="icon-btn" title="Forward (⌘])">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
         <polyline points="6,3 12,8 6,13"/>
       </svg>
     </button>
-    <button id="btn-reload"  class="icon-btn" title="Reload (⌘R)">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M13 8A5 5 0 1 1 8 3h3"/>
-        <polyline points="8,1 11,3 8,6"/>
-      </svg>
-    </button>
-
-    <input id="url-bar" type="text" spellcheck="false"
-           placeholder="Search or enter URL…" autocomplete="off" />
-
     <button id="btn-bookmark" class="icon-btn" title="Bookmark (⌘D)">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
         <path d="M3 2h10v13l-5-3-5 3V2z"/>
       </svg>
     </button>
-    <button id="btn-sidebar" class="icon-btn" title="Bookmarks &amp; History">
+    <button id="btn-sidebar" class="icon-btn" title="Bookmarks &amp; History (⌘⇧L)">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
         <line x1="3" y1="4"  x2="13" y2="4"/>
         <line x1="3" y1="8"  x2="13" y2="8"/>

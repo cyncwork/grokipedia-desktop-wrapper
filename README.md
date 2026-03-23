@@ -4,21 +4,21 @@ A native macOS desktop app for [grokipedia.com](https://grokipedia.com) — xAI'
 
 ## Stack
 
-- **Rust / Tauri 2** (`src-tauri/`) — all native behaviour: tab management, window layout, SQLite persistence, sidebar window
+- **Rust / Tauri 2** (`src-tauri/`) — window management, tab lifecycle, SQLite persistence, sidebar window
 - **Vanilla HTML/CSS/JS** (`ui/`) — no bundler, no framework. Tauri injects `window.__TAURI__` via `withGlobalTauri: true`
 - **SQLite** via `rusqlite` (bundled) — stores history and bookmarks in `~/Library/Application Support/com.grokipedia.desktop/grokipedia.db`
 
 ## Architecture
 
-The UI is split into two webview layers:
+The main window is a `WebviewWindow` whose own webview loads the chrome UI (`index.html`). On macOS, the title bar uses `TitleBarStyle::Overlay` so the chrome sits directly in the title bar area — a single compact 40 px row with tabs, navigation buttons, bookmark, and sidebar toggle.
+
+Content tabs are child `Webview`s (Tauri 2 `unstable` feature) layered on top of the main webview, positioned below the chrome. All content webviews share the same WebKit data store, so cookies from `accounts.x.ai` persist across tabs automatically.
 
 | Webview | Purpose |
 |---|---|
-| `tabbar` (child) | 88px chrome strip at the top — tab bar + nav/address bar (`index.html`) |
-| `tab-N` (child) | One per open tab, loads grokipedia.com pages |
+| `main` (WebviewWindow) | Chrome row — tabs, back/forward, bookmark, sidebar (`index.html`) |
+| `tab-N` (child Webview) | One per open tab, loads grokipedia.com pages |
 | `sidebar` (WebviewWindow) | Detached bookmarks & history panel (`sidebar.html`) |
-
-All `tab-N` webviews share the same WebKit data store, so cookies from `accounts.x.ai` are shared automatically — login persists across tabs.
 
 ## Running
 
@@ -41,7 +41,6 @@ source "$HOME/.cargo/env" && cargo tauri build
 |---|---|
 | New tab | ⌘T |
 | Close tab | ⌘W |
-| Focus address bar | ⌘L |
 | Reload | ⌘R |
 | Back / Forward | ⌘[ / ⌘] |
 | Bookmarks & History panel | ⌘⇧L |
@@ -51,18 +50,10 @@ source "$HOME/.cargo/env" && cargo tauri build
 
 ## Known Issues
 
-### Sidebar panel (bookmarks & history)
+### Sidebar doesn't track the main window
 
-**Symptom:** The sidebar opens as a separate floating `WebviewWindow` positioned flush against the right edge of the main window. It does not slide in/out — it appears and disappears instantly. It also does not move if the main window is dragged.
-
-**Root cause:** The sidebar is implemented as a standalone `WebviewWindow` (a separate OS window with no decorations), not as a child webview layered inside the main window. Its position is calculated once at open time from `outer_position()` + `inner_size()`. There is no ongoing position sync and no animation.
-
-**Proper fix (TODO):** Either (a) convert the sidebar to a child `Webview` inside the main window so it moves and resizes automatically, or (b) add a `WindowEvent::Moved` / `WindowEvent::Resized` listener that repositions the sidebar window whenever the main window changes.
+The sidebar opens as a separate floating `WebviewWindow`. It does not move when the main window is dragged or resized. A future fix will convert it to a child `Webview` inside the main window so it follows automatically.
 
 ### Bookmark button state
 
-**Symptom:** The bookmark button (⌘D) occasionally shows the wrong active/inactive state — e.g., appears bookmarked on a page that has not been saved, or vice versa after navigating.
-
-**Root cause:** `updateBookmarkBtn()` fetches the full bookmark list from SQLite on every call and checks if the current tab's URL matches. The check runs asynchronously and the result can arrive after the tab URL has already changed (e.g., after a fast navigation or tab switch), leaving the button in a stale state.
-
-**Proper fix (TODO):** Invalidate the bookmark button state synchronously on tab switch and navigation, and consider caching the bookmark list in JS state rather than re-fetching from Rust on every update.
+The bookmark button occasionally shows the wrong active/inactive state after fast tab switches or navigation, due to an async race in `updateBookmarkBtn()`. A future fix will cache the bookmark set in JS and update it synchronously.

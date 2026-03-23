@@ -12,7 +12,6 @@ const state = {
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
 const tabsEl      = document.getElementById('tabs');
-const urlBar      = document.getElementById('url-bar');
 const btnBookmark = document.getElementById('btn-bookmark');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -28,14 +27,6 @@ function shortTitle(url) {
     }
     return u.hostname.replace('www.', '');
   } catch { return url; }
-}
-
-function normaliseUrl(raw) {
-  const s = raw.trim();
-  if (!s) return HOME;
-  if (/^https?:\/\//i.test(s)) return s;
-  if (!s.includes(' ') && s.includes('.')) return 'https://' + s;
-  return `https://grokipedia.com/search?q=${encodeURIComponent(s)}`;
 }
 
 function escHtml(s) {
@@ -61,8 +52,6 @@ function renderTabs() {
       </button>`;
     tabsEl.appendChild(el);
   }
-  const tab = activeTab();
-  urlBar.value = tab ? tab.url : '';
   updateBookmarkBtn();
 }
 
@@ -95,14 +84,12 @@ async function switchTab(tabId) {
   renderTabs();
 }
 
-async function navigateActive(raw) {
-  const url = normaliseUrl(raw);
+async function navigateActive(url) {
   const tab = activeTab();
   if (!tab) return;
   await invoke('navigate_tab', { tabId: tab.id, url });
   tab.url   = url;
   tab.title = shortTitle(url);
-  urlBar.value = url;
   renderTabs();
   invoke('add_history', { url, title: tab.title });
 }
@@ -156,15 +143,6 @@ document.getElementById('btn-back').addEventListener('click', () => {
 document.getElementById('btn-forward').addEventListener('click', () => {
   const t = activeTab(); if (t) invoke('go_forward', { tabId: t.id });
 });
-document.getElementById('btn-reload').addEventListener('click', () => {
-  const t = activeTab(); if (t) invoke('reload_tab', { tabId: t.id });
-});
-
-urlBar.addEventListener('keydown', e => {
-  if (e.key === 'Enter')  { navigateActive(urlBar.value); urlBar.blur(); }
-  if (e.key === 'Escape') { urlBar.value = activeTab()?.url ?? ''; urlBar.blur(); }
-});
-urlBar.addEventListener('focus', () => urlBar.select());
 
 btnBookmark.addEventListener('click', toggleBookmark);
 
@@ -181,7 +159,6 @@ listen('menu-action', ({ payload }) => {
     case 'reload':       if (t) invoke('reload_tab', { tabId: t.id }); break;
     case 'back':         if (t) invoke('go_back',    { tabId: t.id }); break;
     case 'forward':      if (t) invoke('go_forward', { tabId: t.id }); break;
-    case 'focus-url':    urlBar.focus(); break;
     case 'show-sidebar': toggleSidebar(); break;
     case 'add-bookmark': toggleBookmark(); break;
   }
@@ -203,7 +180,6 @@ listen('tab-navigated', ({ payload }) => {
   if (!tab) return;
   tab.url   = payload.url;
   tab.title = shortTitle(payload.url);
-  if (tab.id === state.activeTabId) urlBar.value = payload.url;
   renderTabs();
   invoke('add_history', { url: payload.url, title: tab.title });
 });

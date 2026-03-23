@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
@@ -10,7 +9,6 @@ use tauri::{
     WebviewUrl,
     LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size, Rect,
     webview::{WebviewBuilder, PageLoadPayload, PageLoadEvent},
-    window::WindowBuilder,
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
 };
 
@@ -41,7 +39,7 @@ pub struct AppState {
     tab_counter: Mutex<u32>,
 }
 
-const CHROME_H: f64 = 88.0;
+const CHROME_H: f64 = 40.0;
 
 fn now_secs() -> i64 {
     SystemTime::now()
@@ -70,12 +68,6 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 // ── Layout helper ─────────────────────────────────────────────────────────────
 
 fn do_layout(app: &AppHandle, w: f64, h: f64) {
-    if let Some(tabbar) = app.get_webview("tabbar") {
-        let _ = tabbar.set_bounds(Rect {
-            position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
-            size:     Size::Logical(LogicalSize::new(w, CHROME_H)),
-        });
-    }
     if let Some(state) = app.try_state::<AppState>() {
         let tabs = state.tabs.lock().unwrap();
         for tab_id in tabs.keys() {
@@ -86,19 +78,6 @@ fn do_layout(app: &AppHandle, w: f64, h: f64) {
                 });
             }
         }
-    }
-}
-
-// Called by the tabbar JS as soon as it loads — at that point the window is
-// on-screen and scale_factor() returns the correct Retina value (2.0).
-#[tauri::command]
-fn fix_layout(app: AppHandle) {
-    if let Some(win) = app.get_window("main") {
-        let scale = win.scale_factor().unwrap_or(1.0);
-        let phys  = win.inner_size().unwrap_or_default();
-        let w = phys.width  as f64 / scale;
-        let h = phys.height as f64 / scale;
-        do_layout(&app, w, h);
     }
 }
 
@@ -133,7 +112,7 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
             if payload.event() == PageLoadEvent::Finished {
                 let url_str = payload.url().to_string();
                 let _ = webview.app_handle().emit_to(
-                    tauri::EventTarget::Webview { label: "tabbar".into() },
+                    tauri::EventTarget::Webview { label: "main".into() },
                     "tab-navigated",
                     serde_json::json!({ "tabId": tab_id_cb, "url": url_str }),
                 );
@@ -153,6 +132,13 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
         tabs.insert(tab_id.clone(), url);
         *state.active_tab.lock().unwrap() = tab_id.clone();
     }
+
+    // Nudge window size by 1 px to force a Resized event — this ensures
+    // do_layout runs with the correct scale_factor after the child webview
+    // is created (works around set_bounds being ignored early in lifecycle).
+    let phys_now = window.inner_size().unwrap_or_default();
+    let _ = window.set_size(PhysicalSize::new(phys_now.width, phys_now.height + 1));
+    let _ = window.set_size(phys_now);
 
     Ok(tab_id)
 }
@@ -354,69 +340,38 @@ pub fn run() {
             });
 
             // ── Main window ───────────────────────────────────────────────────
-            let window = WindowBuilder::new(app, "main")
+            // index.html (chrome) is the window's own webview — it fills the
+            // window automatically, avoiding the child-webview DPI sizing bug.
+            // Overlay title bar lets our single-row chrome sit in the macOS
+            // title-bar area.
+            let mut win_builder = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                WebviewUrl::App("index.html".into()),
+            )
                 .title("Grokipedia")
                 .inner_size(1280.0, 800.0)
-                .min_inner_size(900.0, 600.0)
-                .build()?;
+                .min_inner_size(900.0, 600.0);
 
-            // Use logical coordinates so the OS compositor applies the real
-            // Retina scaling.  scale_factor() returns 1.0 during setup (before
-            // the window is placed on a display), which made the old physical-px
-            // path create an 88-physical-pixel tabbar — only 44 logical px on 2×.
-            let init_phys  = window.inner_size().unwrap_or_default();
-            let init_scale = window.scale_factor().unwrap_or(1.0);
-            let logical_w  = init_phys.width as f64 / init_scale;
+            #[cfg(target_os = "macos")]
+            {
+                win_builder = win_builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
 
-            // ── Tab-bar chrome (CHROME_H logical px, fixed at top) ────────────
-            // on_page_load nudges the window size by 1 px to force a Resized
-            // event — the only path where set_bounds on child webviews is
-            // reliably honoured.
-            let app_handle_tabbar = app.handle().clone();
-            window.add_child(
-                WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into()))
-                    .on_page_load(move |_wv, payload| {
-                        if payload.event() == PageLoadEvent::Finished {
-                            if let Some(win) = app_handle_tabbar.get_window("main") {
-                                let phys = win.inner_size().unwrap_or_default();
-                                let _ = win.set_size(PhysicalSize::new(
-                                    phys.width, phys.height + 1,
-                                ));
-                                let _ = win.set_size(phys);
-                            }
-                        }
-                    }),
-                LogicalPosition::new(0.0, 0.0),
-                LogicalSize::new(logical_w, CHROME_H),
-            )?;
+            win_builder.build()?;
 
-            // ── Resize + first-focus layout (Retina fix) ───────────────────
+            // ── Resize: keep content tab views fitted below the chrome ────────
+            let window = app.get_window("main").expect("main window");
             let app_handle = app.handle().clone();
-            let first_focus_done = AtomicBool::new(false);
             window.on_window_event(move |event| {
-                match event {
-                    tauri::WindowEvent::Resized(phys) => {
-                        let win   = app_handle.get_window("main").unwrap();
-                        let scale = win.scale_factor().unwrap_or(1.0);
-                        let w = phys.width  as f64 / scale;
-                        let h = phys.height as f64 / scale;
-                        do_layout(&app_handle, w, h);
-                    }
-                    tauri::WindowEvent::Focused(true) => {
-                        if !first_focus_done.swap(true, Ordering::SeqCst) {
-                            // Nudge the window size by 1 px to force a Resized
-                            // event — direct set_bounds is silently ignored this
-                            // early in the lifecycle.
-                            if let Some(win) = app_handle.get_window("main") {
-                                let phys = win.inner_size().unwrap_or_default();
-                                let _ = win.set_size(PhysicalSize::new(
-                                    phys.width, phys.height + 1,
-                                ));
-                                let _ = win.set_size(phys);
-                            }
-                        }
-                    }
-                    _ => {}
+                if let tauri::WindowEvent::Resized(phys) = event {
+                    let win   = app_handle.get_window("main").unwrap();
+                    let scale = win.scale_factor().unwrap_or(1.0);
+                    let w = phys.width  as f64 / scale;
+                    let h = phys.height as f64 / scale;
+                    do_layout(&app_handle, w, h);
                 }
             });
 
@@ -459,8 +414,6 @@ pub fn run() {
                 .id("back").accelerator("CmdOrCtrl+[").build(app)?;
             let forward_item = MenuItemBuilder::new("Forward")
                 .id("forward").accelerator("CmdOrCtrl+]").build(app)?;
-            let location_item = MenuItemBuilder::new("Open Location…")
-                .id("focus-url").accelerator("CmdOrCtrl+L").build(app)?;
             let panel_item = MenuItemBuilder::new("Bookmarks & History")
                 .id("show-sidebar").accelerator("CmdOrCtrl+Shift+L").build(app)?;
             let view_menu = SubmenuBuilder::new(app, "View")
@@ -469,7 +422,6 @@ pub fn run() {
                 .item(&back_item)
                 .item(&forward_item)
                 .separator()
-                .item(&location_item)
                 .item(&panel_item)
                 .build()?;
 
@@ -489,14 +441,13 @@ pub fn run() {
             app.set_menu(menu)?;
 
             app.on_menu_event(|app, event| {
-                let target = tauri::EventTarget::Webview { label: "tabbar".into() };
+                let target = tauri::EventTarget::Webview { label: "main".into() };
                 let action = match event.id.0.as_str() {
                     "new-tab"      => "new-tab",
                     "close-tab"    => "close-tab",
                     "reload"       => "reload",
                     "back"         => "back",
                     "forward"      => "forward",
-                    "focus-url"    => "focus-url",
                     "show-sidebar" => "show-sidebar",
                     "add-bookmark" => "add-bookmark",
                     _ => return,
@@ -507,7 +458,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            fix_layout,
             new_tab, close_tab, switch_tab, navigate_tab,
             go_back, go_forward, reload_tab,
             open_sidebar, close_sidebar,

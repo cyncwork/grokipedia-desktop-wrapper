@@ -29,10 +29,11 @@ The app has two layers that never overlap in responsibility:
 
 ### Rust (`src-tauri/src/lib.rs`)
 All native behavior lives here as `#[tauri::command]` functions invoked from JS:
-- **Tab management** — `new_tab`, `close_tab`, `switch_tab`, `navigate_tab`, `go_back`, `go_forward`, `reload_tab`. Each tab is a child `Webview` (Tauri `unstable` feature) created with `window.add_child(builder, position, size)`. Tabs are shown/hidden with `.show()` / `.hide()` to preserve per-tab state.
+- **Window** — a `WebviewWindowBuilder` creates the main window with `index.html` as its own webview. On macOS, `TitleBarStyle::Overlay` + `hidden_title(true)` lets the chrome sit in the title bar area (traffic lights overlaid on the left).
+- **Tab management** — `new_tab`, `close_tab`, `switch_tab`, `navigate_tab`, `go_back`, `go_forward`, `reload_tab`. Each tab is a child `Webview` (Tauri `unstable` feature) created with `window.add_child(builder, position, size)`. Tabs are shown/hidden with `.show()` / `.hide()` to preserve per-tab state. After creating a child webview, `new_tab` nudges the window size by 1 px to force a `Resized` event — this ensures `do_layout` runs with the correct `scale_factor()`.
 - **Sidebar** — `open_sidebar` / `close_sidebar` open a decoration-free `WebviewWindow` positioned flush against the right edge of the main window.
 - **Persistence** — `rusqlite` (bundled SQLite) stores history and bookmarks in `~/<AppData>/grokipedia.db`. Commands: `add_history`, `get_history`, `clear_history`, `add_bookmark`, `get_bookmarks`, `delete_bookmark`.
-- **Resize handling** — a `window.on_window_event` listener resizes the `tabbar` webview (always 88 px tall, full width) and all content webviews whenever the window is resized.
+- **Resize handling** — a `window.on_window_event` listener calls `do_layout()` on every `Resized` event, repositioning all content `tab-N` webviews below the chrome.
 
 ### UI (`ui/`)
 Vanilla HTML/CSS/JS, no bundler. Tauri injects `window.__TAURI__` because `withGlobalTauri: true` is set in `tauri.conf.json`. The JS accesses the API as:
@@ -40,19 +41,18 @@ Vanilla HTML/CSS/JS, no bundler. Tauri injects `window.__TAURI__` because `withG
 const { invoke } = window.__TAURI__.core;
 const { listen, emit } = window.__TAURI__.event;
 ```
-- `index.html` / `app.js` — the tab bar + nav bar chrome (88 px, always visible). Manages tab state in a plain JS array and calls Rust commands.
+- `index.html` / `app.js` — the single-row chrome bar (40 px) rendered in the macOS title bar area. Contains tabs, back/forward, bookmark, and sidebar buttons. No address bar — the app is dedicated to grokipedia.com. Manages tab state in a plain JS array and calls Rust commands.
 - `sidebar.html` / `sidebar.js` — the bookmarks/history panel. Opened as a separate window by Rust. Navigating a link emits `sidebar-navigate` which `app.js` listens for to navigate the active tab.
 - `style.css` — shared by both pages (chrome styles + `.sidebar-root` styles).
 
 ### Key constants
-- `CHROME_H = 88.0` in Rust (`lib.rs`) is the total chrome height (two 44px bars in CSS). If you change this, update both the Rust constant and the `#tab-bar` / `#nav-bar` heights in `style.css`.
+- `CHROME_H = 40.0` in Rust (`lib.rs`) is the chrome bar height. If you change this, update both the Rust constant and the `#chrome-bar` height in `style.css`.
 - Content webviews start at `y = CHROME_H` and fill the rest of the window.
 
 ### Webview labels
 | Label | Type | Purpose |
 |---|---|---|
-| `main` | `Window` | The host window (no webview of its own) |
-| `tabbar` | child `Webview` | Our chrome UI (index.html) |
+| `main` | `WebviewWindow` | The host window; its own webview loads `index.html` (chrome) |
 | `tab-N` | child `Webview` | Content tabs (grokipedia.com pages) |
 | `sidebar` | `WebviewWindow` | Bookmarks/history panel (sidebar.html) |
 
@@ -60,7 +60,7 @@ const { listen, emit } = window.__TAURI__.event;
 All `tab-N` webviews share the same WebKit data store (Tauri default), so cookies from `accounts.x.ai` are automatically shared — no extra work needed.
 
 ### Permissions / CSP
-`src-tauri/capabilities/default.json` declares which Tauri commands the frontend may call. CSP is intentionally set to `null` in `tauri.conf.json` because the app loads an external domain.
+`src-tauri/capabilities/default.json` declares which webviews may call Tauri commands (`main` and `sidebar`). CSP is intentionally set to `null` in `tauri.conf.json` because the app loads an external domain.
 
 ### Event flow
 ```
@@ -71,8 +71,8 @@ User clicks link in sidebar
 
 Content webview finishes loading a page
   → on_page_load callback in Rust fires
-  → Rust emits 'tab-navigated' to the 'tabbar' webview
-  → app.js updates tab title/URL bar and records history
+  → Rust emits 'tab-navigated' to the 'main' webview
+  → app.js updates tab title and records history
 ```
 
 ## Verification
@@ -85,9 +85,7 @@ If it fails, fix the error before moving on. Do not present partial or non-compi
 
 ## Known Issues — Fix Guidance
 
-These are the two open bugs. Tackle them **one at a time** in separate sessions. Each section describes the root cause, the intended fix strategy, and the files to touch.
-
-### Issue 1: Sidebar doesn't track the main window
+### Sidebar doesn't track the main window
 
 **Files:** `src-tauri/src/lib.rs`, `ui/app.js`, `ui/style.css`
 
@@ -99,14 +97,9 @@ These are the two open bugs. Tackle them **one at a time** in separate sessions.
 3. `close_sidebar` should call `.close()` on the child webview (or `.hide()` / `.show()` if you want to preserve its state).
 4. In `sidebar.html` / `sidebar.js`, the `emit('sidebar-navigate')` and `emit('sidebar-closed')` events stay the same — child webviews can still use `window.__TAURI__.event`.
 5. Remove the old `WebviewWindow` creation code entirely.
-6. Update the webview labels table in this CLAUDE.md: sidebar becomes a child `Webview`, not a `WebviewWindow`.
+6. Update `capabilities/default.json` if the sidebar label changes.
 
-**Gotchas:**
-- Child webviews created with `window.add_child()` share the main window's lifecycle — they move and resize automatically when `do_layout()` repositions them.
-- The sidebar URL should point to `sidebar.html` using the same `tauri://localhost/sidebar.html` scheme.
-- If `capabilities/default.json` restricts which webviews can call commands, make sure `sidebar` is allowed.
-
-### Issue 2: Bookmark button shows stale state
+### Bookmark button shows stale state
 
 **Files:** `ui/app.js`
 
@@ -116,12 +109,5 @@ These are the two open bugs. Tackle them **one at a time** in separate sessions.
 1. Add a module-level `Set` in `app.js`: `let bookmarkUrls = new Set();`
 2. On startup, populate it: `const bms = await invoke('get_bookmarks'); bms.forEach(b => bookmarkUrls.add(b.url));`
 3. Rewrite `updateBookmarkBtn()` to be synchronous: `btnBookmark.classList.toggle('lit', bookmarkUrls.has(activeTab()?.url));`
-4. In `toggleBookmark()`, after adding/removing via Rust, update the Set immediately: `bookmarkUrls.add(url)` or `bookmarkUrls.delete(url)`.
-5. Call `updateBookmarkBtn()` synchronously inside:
-   - The `tab-navigated` event listener (after updating `tab.url`)
-   - The `switchTab()` function (after updating `state.active`)
-6. Keep the Rust `get_bookmarks` command — the sidebar still uses it to render the full list.
-
-**Gotchas:**
-- The Set only needs URLs, not full bookmark objects. `toggleBookmark()` still needs the bookmark `id` for deletion, so fetch the list there or store a Map instead.
-- If the sidebar deletes a bookmark, it should emit an event that `app.js` listens for to update the cache.
+4. In `toggleBookmark()`, after adding/removing via Rust, update the Set immediately.
+5. If the sidebar deletes a bookmark, it should emit an event that `app.js` listens for to update the cache.
