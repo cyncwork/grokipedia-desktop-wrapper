@@ -8,7 +8,7 @@ A native desktop app for **grokipedia.com** (xAI's Wikipedia-style platform). It
 
 ## Commands
 
-All Rust commands require `source "$HOME/.cargo/env"` first (or a shell restart after installing Rust).
+All Rust commands require `source "$HOME/.cargo/env"` first (or a shell restart after installing Rust). The `cargo-tauri` CLI must also be installed (`cargo install tauri-cli`).
 
 ```bash
 # Run in development (hot-reloads UI, rebuilds Rust on change)
@@ -59,6 +59,9 @@ const { listen, emit } = window.__TAURI__.event;
 ### Shared login state
 All `tab-N` webviews share the same WebKit data store (Tauri default), so cookies from `accounts.x.ai` are automatically shared — no extra work needed.
 
+### Permissions / CSP
+`src-tauri/capabilities/default.json` declares which Tauri commands the frontend may call. CSP is intentionally set to `null` in `tauri.conf.json` because the app loads an external domain.
+
 ### Event flow
 ```
 User clicks link in sidebar
@@ -71,3 +74,54 @@ Content webview finishes loading a page
   → Rust emits 'tab-navigated' to the 'tabbar' webview
   → app.js updates tab title/URL bar and records history
 ```
+
+## Verification
+
+After ANY code change, always run:
+```bash
+source "$HOME/.cargo/env" && cargo build --manifest-path src-tauri/Cargo.toml
+```
+If it fails, fix the error before moving on. Do not present partial or non-compiling code.
+
+## Known Issues — Fix Guidance
+
+These are the two open bugs. Tackle them **one at a time** in separate sessions. Each section describes the root cause, the intended fix strategy, and the files to touch.
+
+### Issue 1: Sidebar doesn't track the main window
+
+**Files:** `src-tauri/src/lib.rs`, `ui/app.js`, `ui/style.css`
+
+**What's broken:** The sidebar is a standalone `WebviewWindow` whose position is calculated once when opened. It doesn't move when the main window moves or resizes.
+
+**Fix strategy (preferred — convert to child webview):**
+1. Replace `open_sidebar` in `lib.rs` so it creates a child `Webview` (same as `tab-N` webviews) instead of a `WebviewWindow`. Label it `sidebar`. Position it at `x = window_width - 300`, `y = CHROME_H`, width 300, height `window_height - CHROME_H`.
+2. Update `do_layout()` to check if a `sidebar` child webview exists. If it does, position it at the right edge and shrink all `tab-N` webviews to `width - 300` so content doesn't hide behind the sidebar.
+3. `close_sidebar` should call `.close()` on the child webview (or `.hide()` / `.show()` if you want to preserve its state).
+4. In `sidebar.html` / `sidebar.js`, the `emit('sidebar-navigate')` and `emit('sidebar-closed')` events stay the same — child webviews can still use `window.__TAURI__.event`.
+5. Remove the old `WebviewWindow` creation code entirely.
+6. Update the webview labels table in this CLAUDE.md: sidebar becomes a child `Webview`, not a `WebviewWindow`.
+
+**Gotchas:**
+- Child webviews created with `window.add_child()` share the main window's lifecycle — they move and resize automatically when `do_layout()` repositions them.
+- The sidebar URL should point to `sidebar.html` using the same `tauri://localhost/sidebar.html` scheme.
+- If `capabilities/default.json` restricts which webviews can call commands, make sure `sidebar` is allowed.
+
+### Issue 2: Bookmark button shows stale state
+
+**Files:** `ui/app.js`
+
+**What's broken:** `updateBookmarkBtn()` calls `invoke('get_bookmarks')` every time, which is async. If the user switches tabs or navigates while the fetch is in-flight, the result applies to a URL that's no longer active.
+
+**Fix strategy:**
+1. Add a module-level `Set` in `app.js`: `let bookmarkUrls = new Set();`
+2. On startup, populate it: `const bms = await invoke('get_bookmarks'); bms.forEach(b => bookmarkUrls.add(b.url));`
+3. Rewrite `updateBookmarkBtn()` to be synchronous: `btnBookmark.classList.toggle('lit', bookmarkUrls.has(activeTab()?.url));`
+4. In `toggleBookmark()`, after adding/removing via Rust, update the Set immediately: `bookmarkUrls.add(url)` or `bookmarkUrls.delete(url)`.
+5. Call `updateBookmarkBtn()` synchronously inside:
+   - The `tab-navigated` event listener (after updating `tab.url`)
+   - The `switchTab()` function (after updating `state.active`)
+6. Keep the Rust `get_bookmarks` command — the sidebar still uses it to render the full list.
+
+**Gotchas:**
+- The Set only needs URLs, not full bookmark objects. `toggleBookmark()` still needs the bookmark `id` for deletion, so fetch the list there or store a Map instead.
+- If the sidebar deletes a bookmark, it should emit an event that `app.js` listens for to update the cache.

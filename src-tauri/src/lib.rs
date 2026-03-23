@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
@@ -359,28 +360,63 @@ pub fn run() {
                 .min_inner_size(900.0, 600.0)
                 .build()?;
 
-            // Measure the actual physical content area — use physical pixels for
-            // add_child because Tauri treats those values as physical on Retina.
+            // Use logical coordinates so the OS compositor applies the real
+            // Retina scaling.  scale_factor() returns 1.0 during setup (before
+            // the window is placed on a display), which made the old physical-px
+            // path create an 88-physical-pixel tabbar — only 44 logical px on 2×.
             let init_phys  = window.inner_size().unwrap_or_default();
             let init_scale = window.scale_factor().unwrap_or(1.0);
-            let phys_chrome = (CHROME_H * init_scale).round() as u32;
+            let logical_w  = init_phys.width as f64 / init_scale;
 
             // ── Tab-bar chrome (CHROME_H logical px, fixed at top) ────────────
+            // on_page_load nudges the window size by 1 px to force a Resized
+            // event — the only path where set_bounds on child webviews is
+            // reliably honoured.
+            let app_handle_tabbar = app.handle().clone();
             window.add_child(
-                WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into())),
-                PhysicalPosition::new(0_i32, 0_i32),
-                PhysicalSize::new(init_phys.width, phys_chrome),
+                WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into()))
+                    .on_page_load(move |_wv, payload| {
+                        if payload.event() == PageLoadEvent::Finished {
+                            if let Some(win) = app_handle_tabbar.get_window("main") {
+                                let phys = win.inner_size().unwrap_or_default();
+                                let _ = win.set_size(PhysicalSize::new(
+                                    phys.width, phys.height + 1,
+                                ));
+                                let _ = win.set_size(phys);
+                            }
+                        }
+                    }),
+                LogicalPosition::new(0.0, 0.0),
+                LogicalSize::new(logical_w, CHROME_H),
             )?;
 
-            // ── Resize: keep chrome + content views fitted ────────────────────
+            // ── Resize + first-focus layout (Retina fix) ───────────────────
             let app_handle = app.handle().clone();
+            let first_focus_done = AtomicBool::new(false);
             window.on_window_event(move |event| {
-                if let tauri::WindowEvent::Resized(phys) = event {
-                    let win   = app_handle.get_window("main").unwrap();
-                    let scale = win.scale_factor().unwrap_or(1.0);
-                    let w = phys.width  as f64 / scale;
-                    let h = phys.height as f64 / scale;
-                    do_layout(&app_handle, w, h);
+                match event {
+                    tauri::WindowEvent::Resized(phys) => {
+                        let win   = app_handle.get_window("main").unwrap();
+                        let scale = win.scale_factor().unwrap_or(1.0);
+                        let w = phys.width  as f64 / scale;
+                        let h = phys.height as f64 / scale;
+                        do_layout(&app_handle, w, h);
+                    }
+                    tauri::WindowEvent::Focused(true) => {
+                        if !first_focus_done.swap(true, Ordering::SeqCst) {
+                            // Nudge the window size by 1 px to force a Resized
+                            // event — direct set_bounds is silently ignored this
+                            // early in the lifecycle.
+                            if let Some(win) = app_handle.get_window("main") {
+                                let phys = win.inner_size().unwrap_or_default();
+                                let _ = win.set_size(PhysicalSize::new(
+                                    phys.width, phys.height + 1,
+                                ));
+                                let _ = win.set_size(phys);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             });
 

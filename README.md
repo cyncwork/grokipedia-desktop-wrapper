@@ -51,16 +51,6 @@ source "$HOME/.cargo/env" && cargo tauri build
 
 ## Known Issues
 
-### Address bar not visible in windowed mode
-
-**Symptom:** On Retina displays, the nav/address bar (the second 44px row of the chrome) is missing when the app launches in a normal window. It appears correctly after going fullscreen or resizing the window.
-
-**Root cause:** Tauri's `scale_factor()` returns `1.0` during the `setup` phase before the window is on-screen. The `tabbar` child webview is therefore created at 88 physical pixels tall — which on a 2× Retina display equals only **44 logical pixels** — just enough for the tab row, clipping the address bar entirely.
-
-A `fix_layout` command (invoked from JS at boot) is meant to correct this by re-measuring `scale_factor()` once the window is live and calling `set_bounds` with the proper 88 logical px height. However, `set_bounds` appears to be silently ignored when called too early in the webview lifecycle. A 50ms `setTimeout` has been added as a workaround; a resize or fullscreen event reliably triggers the same fix.
-
-**Proper fix (TODO):** Replace the `setTimeout` hack with a reliable post-render trigger — e.g., listen for a `WindowEvent::Focused` or use a Tauri plugin lifecycle hook — so the layout is always correct on first paint.
-
 ### Sidebar panel (bookmarks & history)
 
 **Symptom:** The sidebar opens as a separate floating `WebviewWindow` positioned flush against the right edge of the main window. It does not slide in/out — it appears and disappears instantly. It also does not move if the main window is dragged.

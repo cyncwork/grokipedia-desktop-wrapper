@@ -209,8 +209,4 @@ listen('tab-navigated', ({ payload }) => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-// Tell Rust to re-measure scale_factor() now that the window is on-screen.
-// Fixes Retina displays where scale_factor()=1.0 during setup → tabbar too short.
-// Delay slightly so the webview is fully live before set_bounds is called.
-setTimeout(() => invoke('fix_layout'), 50);
 openTab(HOME);
