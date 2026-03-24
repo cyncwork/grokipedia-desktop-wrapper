@@ -58,11 +58,12 @@ const { listen } = window.__TAURI__.event;   // app.js uses listen only
 const { emit }   = window.__TAURI__.event;   // sidebar.js uses emit
 ```
 - `index.html` / `app.js` — the single-row chrome bar (40 px) rendered in the macOS title bar area. Contains tabs, back/forward, bookmark, and sidebar buttons. No address bar — the app is dedicated to grokipedia.com. Manages tab state in a plain JS array and calls Rust commands. Also listens for `menu-action` events from the native menu.
-- `sidebar.html` / `sidebar.js` — the bookmarks/history panel. Opened as a separate window by Rust. Navigating a link emits `sidebar-navigate` which `app.js` listens for to navigate the active tab.
+- `sidebar.html` / `sidebar.js` — the bookmarks/history panel. Opened as a child webview inside the main window. Navigating a link emits `sidebar-navigate` which `app.js` listens for to navigate the active tab.
 - `style.css` — shared by both pages (chrome styles + `.sidebar-root` styles).
 
 ### Key constants
 - `CHROME_H = 40.0` in Rust (`lib.rs`) is the chrome bar height. If you change this, update both the Rust constant and the `#chrome-bar` height in `style.css`.
+- `SIDEBAR_W = 300.0` in Rust (`lib.rs`) is the sidebar width. When open, content tabs shrink to `window_width - SIDEBAR_W`.
 - The `chrome` webview occupies `(0, 0)` to `(window_width, CHROME_H)`.
 - Content webviews start at `y = CHROME_H` and fill the rest of the window.
 
@@ -72,7 +73,7 @@ const { emit }   = window.__TAURI__.event;   // sidebar.js uses emit
 | `main` | `Window` (bare, no webview) | The host window that holds all child webviews |
 | `chrome` | child `Webview` | Chrome bar — loads `index.html` (tabs, buttons) |
 | `tab-N` | child `Webview` | Content tabs (grokipedia.com pages) |
-| `sidebar` | `WebviewWindow` | Bookmarks/history panel (sidebar.html) |
+| `sidebar` | child `Webview` | Bookmarks/history panel (sidebar.html) |
 
 ### Navigation filtering
 Content tabs use `on_navigation` to restrict in-app navigation to `grokipedia.com`, `*.grokipedia.com`, and `accounts.x.ai`. All other URLs are opened in the system browser (`open` on macOS, `xdg-open` on Linux). An injected `initialization_script` rewrites `target="_blank"` links to same-window navigation so they go through `on_navigation` instead of being silently blocked.
@@ -110,20 +111,6 @@ source "$HOME/.cargo/env" && cargo build --manifest-path src-tauri/Cargo.toml
 If it fails, fix the error before moving on. Do not present partial or non-compiling code.
 
 ## Known Issues — Fix Guidance
-
-### Sidebar doesn't track the main window
-
-**Files:** `src-tauri/src/lib.rs`, `ui/app.js`, `ui/style.css`
-
-**What's broken:** The sidebar is a standalone `WebviewWindow` whose position is calculated once when opened. It doesn't move when the main window moves or resizes.
-
-**Fix strategy (preferred — convert to child webview):**
-1. Replace `open_sidebar` in `lib.rs` so it creates a child `Webview` (same as `tab-N` webviews) instead of a `WebviewWindow`. Label it `sidebar`. Position it at `x = window_width - 300`, `y = CHROME_H`, width 300, height `window_height - CHROME_H`.
-2. Update `do_layout()` to check if a `sidebar` child webview exists. If it does, position it at the right edge and shrink all `tab-N` webviews to `width - 300` so content doesn't hide behind the sidebar.
-3. `close_sidebar` should call `.close()` on the child webview (or `.hide()` / `.show()` if you want to preserve its state).
-4. In `sidebar.html` / `sidebar.js`, the `emit('sidebar-navigate')` and `emit('sidebar-closed')` events stay the same — child webviews can still use `window.__TAURI__.event`.
-5. Remove the old `WebviewWindow` creation code entirely.
-6. Update `capabilities/default.json` if the sidebar label changes.
 
 ### Bookmark button shows stale state
 

@@ -1,26 +1,64 @@
 # Grokipedia Desktop
 
-A native macOS desktop app for [grokipedia.com](https://grokipedia.com) — xAI's Wikipedia-style platform. Built with Tauri 2, it wraps the site in a multi-tab browser with shared login state, persistent history, and bookmarks. Linux works from the same codebase.
+A native desktop app for [grokipedia.com](https://grokipedia.com) — xAI's Wikipedia-style platform. Built with Tauri 2, it wraps the site in a multi-tab browser with shared login state, persistent history, and bookmarks.
 
-## Stack
+Targets **macOS** and **Linux**.
 
-- **Rust / Tauri 2** (`src-tauri/`) — window management, tab lifecycle, SQLite persistence, sidebar window
-- **Vanilla HTML/CSS/JS** (`ui/`) — no bundler, no framework. Tauri injects `window.__TAURI__` via `withGlobalTauri: true`
-- **SQLite** via `rusqlite` (bundled) — stores history and bookmarks in `~/Library/Application Support/com.grokipedia.desktop/grokipedia.db`
+## Features
 
-## Architecture
+- Multi-tab browsing with shared cookie/session state
+- Bookmarks and browsing history (stored locally in SQLite)
+- Sidebar panel for bookmarks & history
+- Native keyboard shortcuts
+- External links open in your default browser
+- Single-row chrome bar — compact 40 px title bar with tabs, navigation, and controls
 
-The main window is a `WebviewWindow` whose own webview loads the chrome UI (`index.html`). *Chrome* is the UI design term for the app's own controls (tabs, buttons, toolbars) as distinct from the website content. On macOS, the title bar uses `TitleBarStyle::Overlay` so the chrome sits directly in the title bar area — a single compact 40 px row with tabs, navigation buttons, bookmark, and sidebar toggle.
+## Prerequisites
 
-Content tabs are child `Webview`s (Tauri 2 `unstable` feature) layered on top of the main webview, positioned below the chrome. All content webviews share the same WebKit data store, so cookies from `accounts.x.ai` persist across tabs automatically.
+### macOS
 
-| Webview | Purpose |
-|---|---|
-| `main` (WebviewWindow) | Chrome row — tabs, back/forward, bookmark, sidebar (`index.html`) |
-| `tab-N` (child Webview) | One per open tab, loads grokipedia.com pages |
-| `sidebar` (WebviewWindow) | Detached bookmarks & history panel (`sidebar.html`) |
+1. **Xcode Command Line Tools**
+   ```bash
+   xcode-select --install
+   ```
+2. **Rust**
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   source "$HOME/.cargo/env"
+   ```
+3. **Tauri CLI**
+   ```bash
+   cargo install tauri-cli
+   ```
 
-## Running
+### Linux (Debian/Ubuntu)
+
+1. **System dependencies**
+   ```bash
+   sudo apt update
+   sudo apt install -y \
+     build-essential \
+     curl \
+     wget \
+     file \
+     libssl-dev \
+     libgtk-3-dev \
+     libwebkit2gtk-4.1-dev \
+     libappindicator3-dev \
+     librsvg2-dev \
+     patchelf
+   ```
+2. **Rust**
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   source "$HOME/.cargo/env"
+   ```
+3. **Tauri CLI**
+   ```bash
+   cargo install tauri-cli
+   ```
+
+## Building & Running
 
 ```bash
 # Development (hot-reloads UI, rebuilds Rust on change)
@@ -29,11 +67,34 @@ source "$HOME/.cargo/env" && cargo tauri dev
 # Check Rust compiles without running
 source "$HOME/.cargo/env" && cargo build --manifest-path src-tauri/Cargo.toml
 
-# Build a distributable .app
+# Build a distributable app
 source "$HOME/.cargo/env" && cargo tauri build
 ```
 
-> If you rename the project folder, run `cargo clean` inside `src-tauri/` before building to clear any stale cached paths.
+The built app will be at:
+- **macOS:** `src-tauri/target/release/bundle/macos/Grokipedia.app`
+- **Linux:** `src-tauri/target/release/bundle/deb/` or `appimage/`
+
+> If you rename the project folder, run `cargo clean` inside `src-tauri/` before building to clear stale cached paths.
+
+## Stack
+
+- **Rust / Tauri 2** (`src-tauri/`) — window management, tab lifecycle, SQLite persistence
+- **Vanilla HTML/CSS/JS** (`ui/`) — no bundler, no framework
+- **SQLite** via `rusqlite` (bundled) — stores history and bookmarks locally
+
+## Architecture
+
+The main window is a bare `Window` with no webview of its own. The chrome UI and content tabs are non-overlapping child webviews, which eliminates cursor flickering. On macOS, the title bar uses `TitleBarStyle::Overlay` so the chrome sits directly in the 40 px title bar area.
+
+| Webview | Purpose |
+|---|---|
+| `main` | Host window (no webview) |
+| `chrome` | Chrome bar — tabs, back/forward, bookmark, sidebar (`index.html`) |
+| `tab-N` | One per open tab, loads grokipedia.com pages |
+| `sidebar` | Child webview — bookmarks & history panel (`sidebar.html`) |
+
+All content webviews share the same WebKit data store, so cookies from `accounts.x.ai` persist across tabs automatically.
 
 ## Keyboard Shortcuts
 
@@ -46,14 +107,10 @@ source "$HOME/.cargo/env" && cargo tauri build
 | Bookmarks & History panel | ⌘⇧L |
 | Add/remove bookmark | ⌘D |
 
----
-
 ## Known Issues
 
-### Sidebar doesn't track the main window
+- **Bookmark button state** — The bookmark button can show stale active/inactive state after fast tab switches, due to an async race in `updateBookmarkBtn()`.
 
-The sidebar opens as a separate floating `WebviewWindow`. It does not move when the main window is dragged or resized. A future fix will convert it to a child `Webview` inside the main window so it follows automatically.
+## License
 
-### Bookmark button state
-
-The bookmark button occasionally shows the wrong active/inactive state after fast tab switches or navigation, due to an async race in `updateBookmarkBtn()`. A future fix will cache the bookmark set in JS and update it synchronously.
+[MIT](LICENSE)
