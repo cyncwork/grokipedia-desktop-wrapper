@@ -68,7 +68,13 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 
 // ── Layout helper ─────────────────────────────────────────────────────────────
 
+const SIDEBAR_W: f64 = 300.0;
+
 fn do_layout(app: &AppHandle, w: f64, h: f64) {
+    let sidebar_open = app.get_webview("sidebar").is_some();
+    let sidebar_w = if sidebar_open { SIDEBAR_W } else { 0.0 };
+    let content_w = w - sidebar_w;
+
     if let Some(chrome) = app.get_webview("chrome") {
         let _ = chrome.set_bounds(Rect {
             position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
@@ -81,9 +87,17 @@ fn do_layout(app: &AppHandle, w: f64, h: f64) {
             if let Some(wv) = app.get_webview(tab_id) {
                 let _ = wv.set_bounds(Rect {
                     position: Position::Logical(LogicalPosition::new(0.0, CHROME_H)),
-                    size:     Size::Logical(LogicalSize::new(w, h - CHROME_H)),
+                    size:     Size::Logical(LogicalSize::new(content_w, h - CHROME_H)),
                 });
             }
+        }
+    }
+    if sidebar_open {
+        if let Some(sb) = app.get_webview("sidebar") {
+            let _ = sb.set_bounds(Rect {
+                position: Position::Logical(LogicalPosition::new(content_w, CHROME_H)),
+                size:     Size::Logical(LogicalSize::new(sidebar_w, h - CHROME_H)),
+            });
         }
     }
 }
@@ -261,44 +275,45 @@ fn reload_tab(app: AppHandle, tab_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_sidebar(app: AppHandle) -> Result<(), String> {
-    // If already open, just focus it
-    if let Some(w) = app.get_webview_window("sidebar") {
-        w.show().map_err(|e| e.to_string())?;
+    // If already open, do nothing
+    if app.get_webview("sidebar").is_some() {
         return Ok(());
     }
 
-    let main = app.get_window("main").ok_or("no main window")?;
-    let phys  = main.inner_size().map_err(|e| e.to_string())?;
-    let pos   = main.outer_position().map_err(|e| e.to_string())?;
-    let scale = main.scale_factor().map_err(|e| e.to_string())?;
+    let window = app.get_window("main").ok_or("no main window")?;
+    let phys = window.inner_size().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let phys_chrome = (CHROME_H * scale).round() as u32;
+    let phys_sw = (SIDEBAR_W * scale).round() as u32;
 
-    let win_w  = phys.width  as f64 / scale;
-    let win_h  = phys.height as f64 / scale;
-    let sw     = 300.0_f64;
-    let sh     = win_h - CHROME_H;
-    let sx     = pos.x as f64 / scale + win_w - sw;
-    let sy     = pos.y as f64 / scale + CHROME_H;
+    let builder = WebviewBuilder::new("sidebar", WebviewUrl::App("sidebar.html".into()));
 
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        "sidebar",
-        WebviewUrl::App("sidebar.html".into()),
-    )
-    .title("Grokipedia — Panel")
-    .decorations(false)
-    .position(sx, sy)
-    .inner_size(sw, sh)
-    .focused(false)
-    .build()
-    .map_err(|e| e.to_string())?;
+    window.add_child(
+        builder,
+        PhysicalPosition::new((phys.width - phys_sw) as i32, phys_chrome as i32),
+        PhysicalSize::new(phys_sw, phys.height.saturating_sub(phys_chrome)),
+    ).map_err(|e| e.to_string())?;
+
+    // Relayout to shrink content tabs
+    let w = phys.width as f64 / scale;
+    let h = phys.height as f64 / scale;
+    do_layout(&app, w, h);
 
     Ok(())
 }
 
 #[tauri::command]
 fn close_sidebar(app: AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("sidebar") {
-        w.hide().map_err(|e| e.to_string())?;
+    if let Some(wv) = app.get_webview("sidebar") {
+        wv.close().map_err(|e| e.to_string())?;
+    }
+    // Relayout to expand content tabs
+    if let Some(window) = app.get_window("main") {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let phys = window.inner_size().unwrap_or_default();
+        let w = phys.width as f64 / scale;
+        let h = phys.height as f64 / scale;
+        do_layout(&app, w, h);
     }
     Ok(())
 }

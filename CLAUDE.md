@@ -21,7 +21,21 @@ source "$HOME/.cargo/env" && cargo build --manifest-path src-tauri/Cargo.toml
 source "$HOME/.cargo/env" && cargo tauri build
 ```
 
+### Deploy to /Applications (macOS)
+
+After every `cargo tauri build`, replace the installed app:
+
+```bash
+rm -rf /Applications/Grokipedia.app && cp -R src-tauri/target/release/bundle/macos/Grokipedia.app /Applications/Grokipedia.app
+```
+
+**Always do this after building.** The user expects the latest build to be installed in `/Applications`.
+
 There are no tests and no linter configured yet.
+
+### Git commits
+
+**Always propose the commit message to the user for review before committing.** Do not commit without explicit approval of the message.
 
 ## Architecture
 

@@ -3,6 +3,7 @@
   "identifier": "default",
   "description": "Default permissions for Grokipedia chrome",
   "windows": ["chrome", "sidebar"],
+  "webviews": ["chrome", "sidebar"],
   "permissions": [
     "core:default"
   ]
