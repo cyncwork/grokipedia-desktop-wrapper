@@ -1,6 +1,8 @@
-# Grokipedia Desktop
+# Grokipedia Desktop Wrapper
 
-A native desktop app for [grokipedia.com](https://grokipedia.com) — xAI's Wikipedia-style platform. Built with Tauri 2, it wraps the site in a multi-tab browser with shared login state, persistent history, and bookmarks.
+> **Unofficial.** This project is not affiliated with, endorsed by, or associated with xAI or Grokipedia in any way. It is an independent, community-built wrapper around the public [grokipedia.com](https://grokipedia.com) website.
+
+A native desktop app that wraps [grokipedia.com](https://grokipedia.com) in a multi-tab browser with shared login state, persistent history, and bookmarks. Built with Tauri 2.
 
 Targets **macOS** and **Linux**.
 
@@ -110,6 +112,10 @@ All content webviews share the same WebKit data store, so cookies from `accounts
 ## Known Issues
 
 - **Bookmark button state** — The bookmark button can show stale active/inactive state after fast tab switches, due to an async race in `updateBookmarkBtn()`.
+
+## Disclaimer
+
+This is an **unofficial** project. "Grokipedia" and "xAI" are trademarks of their respective owners. This wrapper simply loads the public grokipedia.com website — it does not modify, scrape, or redistribute any of its content.
 
 ## License
 
