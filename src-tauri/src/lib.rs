@@ -147,7 +147,6 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
     let tab_id_cb = tab_id.clone();
     let tab_id_nav = tab_id.clone();
     let app_nav = app.clone();
-    let app_onnav = app.clone();
 
     let builder = WebviewBuilder::new(&tab_id, WebviewUrl::External(parsed))
         // Use a real Safari UA so Cloudflare Turnstile and other bot
@@ -170,11 +169,6 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
                     }
                 } catch {}
             }, true);
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') {
-                    window.location.href = 'grokipedia-cmd:exit-fullscreen';
-                }
-            });
         "#)
         // Intercept new-window requests (window.open / OAuth popups):
         // navigate the current webview instead of opening a popup.
@@ -187,19 +181,6 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
         // Allow all navigation EXCEPT the sentinel scheme used by the
         // click interceptor to signal "open in system browser".
         .on_navigation(move |url| {
-            if url.scheme() == "grokipedia-cmd" {
-                if url.path() == "exit-fullscreen" {
-                    if let Some(win) = app_onnav.get_window("main") {
-                        if win.is_fullscreen().unwrap_or(false) {
-                            #[cfg(target_os = "macos")]
-                            toggle_native_fullscreen(&win);
-                            #[cfg(not(target_os = "macos"))]
-                            { let _ = win.set_fullscreen(false); }
-                        }
-                    }
-                }
-                return false;
-            }
             if url.scheme() == "grokipedia-ext" {
                 let real_url = url.as_str().strip_prefix("grokipedia-ext:").unwrap_or("");
                 if !real_url.is_empty() {
@@ -336,6 +317,34 @@ fn toggle_native_fullscreen(win: &tauri::Window) {
     unsafe { (*ns_window).toggleFullScreen(None) };
 }
 
+#[cfg(target_os = "macos")]
+fn install_escape_monitor(app: &AppHandle) {
+    use objc2_app_kit::{NSEvent, NSEventMask};
+    use std::ptr::NonNull;
+
+    let app_handle = app.clone();
+    let block = block2::RcBlock::new(move |event_ptr: NonNull<NSEvent>| -> *mut NSEvent {
+        let event = unsafe { event_ptr.as_ref() };
+        if event.keyCode() == 53 { // 53 = Escape
+            if let Some(win) = app_handle.get_window("main") {
+                if win.is_fullscreen().unwrap_or(false) {
+                    toggle_native_fullscreen(&win);
+                    return std::ptr::null_mut(); // consume the event
+                }
+            }
+        }
+        event_ptr.as_ptr()
+    });
+    unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+            NSEventMask::KeyDown,
+            &block,
+        );
+    }
+    // Leak the block so it lives for the app's lifetime
+    std::mem::forget(block);
+}
+
 // ── Sidebar commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -351,13 +360,19 @@ fn open_sidebar(app: AppHandle) -> Result<(), String> {
     let phys_chrome = (CHROME_H * scale).round() as u32;
     let phys_sw = (SIDEBAR_W * scale).round() as u32;
 
-    let builder = WebviewBuilder::new("sidebar", WebviewUrl::App("sidebar.html".into()));
+    let builder = WebviewBuilder::new("sidebar", WebviewUrl::App("sidebar.html".into()))
+        .focused(true);
 
     window.add_child(
         builder,
         PhysicalPosition::new((phys.width - phys_sw) as i32, phys_chrome as i32),
         PhysicalSize::new(phys_sw, phys.height.saturating_sub(phys_chrome)),
     ).map_err(|e| e.to_string())?;
+
+    // Focus the sidebar webview so it receives keyboard events
+    if let Some(sb) = app.get_webview("sidebar") {
+        let _ = sb.set_focus();
+    }
 
     // Relayout to shrink content tabs
     let w = phys.width as f64 / scale;
@@ -537,6 +552,9 @@ pub fn run() {
             }
 
             let window = win_builder.build()?;
+
+            #[cfg(target_os = "macos")]
+            install_escape_monitor(app.handle());
 
             // ── Chrome bar (CHROME_H px, fixed at top) ────────────────────────
             // on_page_load nudges window size by 1 px to force a Resized event,

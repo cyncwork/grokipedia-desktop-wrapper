@@ -119,5 +119,84 @@ document.getElementById('btn-clear-history').addEventListener('click', async () 
   renderHistory();
 });
 
+// ── Keyboard navigation ──────────────────────────────────────────────────────
+const panelNames = ['bookmarks', 'history', 'settings'];
+
+function activePanel() {
+  const btn = document.querySelector('.sidebar-tab.active');
+  return btn ? btn.dataset.panel : 'bookmarks';
+}
+
+function getListItems() {
+  const panel = activePanel();
+  if (panel === 'bookmarks') return [...document.querySelectorAll('#bookmark-list .list-item')];
+  if (panel === 'history') return [...document.querySelectorAll('#history-list .list-item')];
+  return [];
+}
+
+function highlightItem(items, idx) {
+  items.forEach(li => li.classList.remove('focused'));
+  if (idx >= 0 && idx < items.length) {
+    items[idx].classList.add('focused');
+    items[idx].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+let focusedIdx = -1;
+
+document.addEventListener('keydown', e => {
+  const items = getListItems();
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const cur = panelNames.indexOf(activePanel());
+    const next = e.shiftKey
+      ? (cur - 1 + panelNames.length) % panelNames.length
+      : (cur + 1) % panelNames.length;
+    showPanel(panelNames[next]);
+    focusedIdx = -1;
+    return;
+  }
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (!items.length) return;
+    focusedIdx = Math.min(focusedIdx + 1, items.length - 1);
+    highlightItem(items, focusedIdx);
+    return;
+  }
+
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!items.length) return;
+    focusedIdx = Math.max(focusedIdx - 1, 0);
+    highlightItem(items, focusedIdx);
+    return;
+  }
+
+  if (e.key === 'Enter') {
+    if (focusedIdx >= 0 && focusedIdx < items.length) {
+      const url = items[focusedIdx].dataset.url;
+      if (url) navigateAndClose(url);
+    }
+    return;
+  }
+
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (activePanel() === 'bookmarks' && focusedIdx >= 0 && focusedIdx < items.length) {
+      const del = items[focusedIdx].querySelector('.item-del');
+      if (del) del.click();
+      focusedIdx = Math.min(focusedIdx, getListItems().length - 1);
+    }
+    return;
+  }
+});
+
+// Reset focus index when panels re-render
+const origRenderBookmarks = renderBookmarks;
+renderBookmarks = async function() { await origRenderBookmarks(); focusedIdx = -1; };
+const origRenderHistory = renderHistory;
+renderHistory = async function() { await origRenderHistory(); focusedIdx = -1; };
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 renderBookmarks();
