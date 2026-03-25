@@ -37,6 +37,65 @@ function escHtml(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Tab drag-to-reorder (pointer events) ─────────────────────────────────────
+let drag = null; // { tabId, startX, el, ghost }
+const DRAG_THRESHOLD = 5;
+
+tabsEl.addEventListener('pointerdown', e => {
+  const tabEl = e.target.closest('.tab');
+  if (!tabEl || e.target.closest('.tab-close')) return;
+  const tabId = tabEl.dataset.id;
+  drag = { tabId, startX: e.clientX, el: tabEl, active: false };
+  tabEl.setPointerCapture(e.pointerId);
+});
+
+tabsEl.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.active) {
+    if (Math.abs(e.clientX - drag.startX) < DRAG_THRESHOLD) return;
+    drag.active = true;
+    drag.el.classList.add('dragging');
+  }
+  // Find which tab we're hovering over
+  tabsEl.querySelectorAll('.tab').forEach(t => t.classList.remove('drop-before', 'drop-after'));
+  const target = [...tabsEl.querySelectorAll('.tab')].find(t => {
+    if (t.dataset.id === drag.tabId) return false;
+    const r = t.getBoundingClientRect();
+    return e.clientX >= r.left && e.clientX <= r.right;
+  });
+  if (target) {
+    const r = target.getBoundingClientRect();
+    target.classList.add(e.clientX < r.left + r.width / 2 ? 'drop-before' : 'drop-after');
+  }
+});
+
+tabsEl.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const wasDrag = drag.active;
+  const dragId = drag.tabId;
+  drag.el.classList.remove('dragging');
+  tabsEl.querySelectorAll('.tab').forEach(t => t.classList.remove('drop-before', 'drop-after'));
+
+  if (wasDrag) {
+    const target = [...tabsEl.querySelectorAll('.tab')].find(t => {
+      if (t.dataset.id === dragId) return false;
+      const r = t.getBoundingClientRect();
+      return e.clientX >= r.left && e.clientX <= r.right;
+    });
+    if (target) {
+      const fromIdx = state.tabs.findIndex(t => t.id === dragId);
+      const toIdx = state.tabs.findIndex(t => t.id === target.dataset.id);
+      const r = target.getBoundingClientRect();
+      const insertIdx = e.clientX < r.left + r.width / 2 ? toIdx : toIdx + 1;
+      const [moved] = state.tabs.splice(fromIdx, 1);
+      const finalIdx = insertIdx > fromIdx ? insertIdx - 1 : insertIdx;
+      state.tabs.splice(finalIdx, 0, moved);
+      renderTabs();
+    }
+  }
+  drag = null;
+});
+
 // ── Tab rendering ─────────────────────────────────────────────────────────────
 function renderTabs() {
   tabsEl.innerHTML = '';
