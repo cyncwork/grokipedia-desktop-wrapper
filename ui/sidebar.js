@@ -87,7 +87,9 @@ async function navigateAndClose(url) {
 document.getElementById('bookmark-list').addEventListener('click', async e => {
   const del = e.target.closest('.item-del');
   if (del) {
+    const li = del.closest('.list-item');
     await invoke('delete_bookmark', { id: parseInt(del.dataset.bmId, 10) });
+    if (li?.dataset.url) await emit('bookmark-deleted', { url: li.dataset.url });
     renderBookmarks();
     return;
   }

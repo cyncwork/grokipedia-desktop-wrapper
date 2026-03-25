@@ -109,18 +109,3 @@ After ANY code change, always run:
 source "$HOME/.cargo/env" && cargo build --manifest-path src-tauri/Cargo.toml
 ```
 If it fails, fix the error before moving on. Do not present partial or non-compiling code.
-
-## Known Issues — Fix Guidance
-
-### Bookmark button shows stale state
-
-**Files:** `ui/app.js`
-
-**What's broken:** `updateBookmarkBtn()` calls `invoke('get_bookmarks')` every time, which is async. If the user switches tabs or navigates while the fetch is in-flight, the result applies to a URL that's no longer active.
-
-**Fix strategy:**
-1. Add a module-level `Set` in `app.js`: `let bookmarkUrls = new Set();`
-2. On startup, populate it: `const bms = await invoke('get_bookmarks'); bms.forEach(b => bookmarkUrls.add(b.url));`
-3. Rewrite `updateBookmarkBtn()` to be synchronous: `btnBookmark.classList.toggle('lit', bookmarkUrls.has(activeTab()?.url));`
-4. In `toggleBookmark()`, after adding/removing via Rust, update the Set immediately.
-5. If the sidebar deletes a bookmark, it should emit an event that `app.js` listens for to update the cache.

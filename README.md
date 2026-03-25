@@ -109,10 +109,6 @@ All content webviews share the same WebKit data store, so cookies from `accounts
 | Bookmarks & History panel | ⌘⇧L |
 | Add/remove bookmark | ⌘D |
 
-## Known Issues
-
-- **Bookmark button state** — The bookmark button can show stale active/inactive state after fast tab switches, due to an async race in `updateBookmarkBtn()`.
-
 ## Disclaimer
 
 This is an **unofficial** project. "Grokipedia" and "xAI" are trademarks of their respective owners. This wrapper simply loads the public grokipedia.com website — it does not modify, scrape, or redistribute any of its content.

@@ -10,6 +10,8 @@ const state = {
   sidebarOpen: false,
 };
 
+let bookmarkUrls = new Set();
+
 // ── DOM ───────────────────────────────────────────────────────────────────────
 const tabsEl      = document.getElementById('tabs');
 const btnBookmark = document.getElementById('btn-bookmark');
@@ -110,20 +112,24 @@ async function toggleSidebar() {
 }
 
 // ── Bookmark helpers ──────────────────────────────────────────────────────────
-async function updateBookmarkBtn() {
+function updateBookmarkBtn() {
   const tab = activeTab();
   if (!tab) return;
-  const bms = await invoke('get_bookmarks');
-  btnBookmark.classList.toggle('lit', bms.some(b => b.url === tab.url));
+  btnBookmark.classList.toggle('lit', bookmarkUrls.has(tab.url));
 }
 
 async function toggleBookmark() {
   const tab = activeTab();
   if (!tab) return;
-  const bms = await invoke('get_bookmarks');
-  const ex  = bms.find(b => b.url === tab.url);
-  if (ex) await invoke('delete_bookmark', { id: ex.id });
-  else    await invoke('add_bookmark', { url: tab.url, title: tab.title || shortTitle(tab.url) });
+  if (bookmarkUrls.has(tab.url)) {
+    const bms = await invoke('get_bookmarks');
+    const ex  = bms.find(b => b.url === tab.url);
+    if (ex) await invoke('delete_bookmark', { id: ex.id });
+    bookmarkUrls.delete(tab.url);
+  } else {
+    await invoke('add_bookmark', { url: tab.url, title: tab.title || shortTitle(tab.url) });
+    bookmarkUrls.add(tab.url);
+  }
   updateBookmarkBtn();
 }
 
@@ -164,6 +170,12 @@ listen('menu-action', ({ payload }) => {
   }
 });
 
+// Sidebar deleted a bookmark — sync the local cache
+listen('bookmark-deleted', ({ payload }) => {
+  bookmarkUrls.delete(payload.url);
+  updateBookmarkBtn();
+});
+
 // Sidebar closed itself (user clicked a link)
 listen('sidebar-closed', () => {
   state.sidebarOpen = false;
@@ -185,4 +197,8 @@ listen('tab-navigated', ({ payload }) => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+invoke('get_bookmarks').then(bms => {
+  bms.forEach(b => bookmarkUrls.add(b.url));
+  updateBookmarkBtn();
+});
 openTab(HOME);
