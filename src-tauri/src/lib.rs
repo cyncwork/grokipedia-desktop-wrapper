@@ -285,6 +285,7 @@ fn switch_tab(app: AppHandle, state: tauri::State<AppState>, tab_id: String) -> 
     }
     if let Some(wv) = app.get_webview(&tab_id) {
         wv.show().map_err(|e| e.to_string())?;
+        let _ = wv.set_focus();
     }
     *state.active_tab.lock().unwrap() = tab_id;
     Ok(())
@@ -319,6 +320,23 @@ fn go_forward(app: AppHandle, tab_id: String) -> Result<(), String> {
 fn reload_tab(app: AppHandle, tab_id: String) -> Result<(), String> {
     if let Some(wv) = app.get_webview(&tab_id) {
         wv.eval("location.reload()").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// ── Focus commands ───────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn focus_search(app: AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    let active = state.active_tab.lock().unwrap().clone();
+    if let Some(wv) = app.get_webview(&active) {
+        let _ = wv.set_focus();
+        wv.eval(r#"
+            (function() {
+                var el = document.querySelector('input[type="search"], input[type="text"], textarea');
+                if (el) { el.focus(); el.select(); }
+            })();
+        "#).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -361,14 +379,31 @@ fn install_escape_monitor(app: &AppHandle) {
     let app_handle = app.clone();
     let block = block2::RcBlock::new(move |event_ptr: NonNull<NSEvent>| -> *mut NSEvent {
         let event = unsafe { event_ptr.as_ref() };
-        if event.keyCode() == 53 { // 53 = Escape
+        let keycode = event.keyCode();
+
+        // Escape (53) — exit fullscreen
+        if keycode == 53 {
             if let Some(win) = app_handle.get_window("main") {
                 if win.is_fullscreen().unwrap_or(false) {
                     toggle_native_fullscreen(&win);
-                    return std::ptr::null_mut(); // consume the event
+                    return std::ptr::null_mut();
                 }
             }
         }
+
+        // Ctrl+Tab (48) / Ctrl+Shift+Tab — cycle tabs
+        if keycode == 48 {
+            let modifiers = event.modifierFlags();
+            let ctrl = modifiers.contains(objc2_app_kit::NSEventModifierFlags::Control);
+            let shift = modifiers.contains(objc2_app_kit::NSEventModifierFlags::Shift);
+            if ctrl {
+                let direction = if shift { "prev-tab" } else { "next-tab" };
+                let target = tauri::EventTarget::Webview { label: "chrome".into() };
+                let _ = app_handle.emit_to(target, "menu-action", direction);
+                return std::ptr::null_mut();
+            }
+        }
+
         event_ptr.as_ptr()
     });
     unsafe {
@@ -657,9 +692,13 @@ pub fn run() {
                 .id("new-tab").accelerator("CmdOrCtrl+T").build(app)?;
             let close_tab_item = MenuItemBuilder::new("Close Tab")
                 .id("close-tab").accelerator("CmdOrCtrl+W").build(app)?;
+            let focus_search_item = MenuItemBuilder::new("Focus Search")
+                .id("focus-search").accelerator("CmdOrCtrl+L").build(app)?;
             let file_menu = SubmenuBuilder::new(app, "File")
                 .item(&new_tab_item)
                 .item(&close_tab_item)
+                .separator()
+                .item(&focus_search_item)
                 .build()?;
 
             let reload_item = MenuItemBuilder::new("Reload Page")
@@ -713,6 +752,21 @@ pub fn run() {
                     }
                     return;
                 }
+                if event.id.0.as_str() == "focus-search" {
+                    if let Some(st) = app.try_state::<AppState>() {
+                        let active = st.active_tab.lock().unwrap().clone();
+                        if let Some(wv) = app.get_webview(&active) {
+                            let _ = wv.set_focus();
+                            let _ = wv.eval(r#"
+                                (function() {
+                                    var el = document.querySelector('input[type="search"], input[type="text"], textarea');
+                                    if (el) { el.focus(); el.select(); }
+                                })();
+                            "#);
+                        }
+                    }
+                    return;
+                }
                 if event.id.0.as_str() == "toggle-fullscreen" {
                     if let Some(win) = app.get_window("main") {
                         #[cfg(target_os = "macos")]
@@ -744,7 +798,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             new_tab, close_tab, switch_tab, navigate_tab,
             go_back, go_forward, reload_tab,
-            start_drag, exit_fullscreen,
+            focus_search, start_drag, exit_fullscreen,
             open_sidebar, close_sidebar,
             add_history, get_history, clear_history,
             add_bookmark, get_bookmarks, delete_bookmark,

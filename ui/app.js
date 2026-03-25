@@ -160,6 +160,13 @@ async function switchTab(tabId) {
   saveTabs();
 }
 
+function cycleTab(direction) {
+  if (state.tabs.length < 2) return;
+  const idx = state.tabs.findIndex(t => t.id === state.activeTabId);
+  const next = (idx + direction + state.tabs.length) % state.tabs.length;
+  switchTab(state.tabs[next].id);
+}
+
 async function navigateActive(url) {
   const tab = activeTab();
   if (!tab) return;
@@ -240,6 +247,8 @@ listen('menu-action', ({ payload }) => {
     case 'reload':       if (t) invoke('reload_tab', { tabId: t.id }); break;
     case 'back':         if (t) invoke('go_back',    { tabId: t.id }); break;
     case 'forward':      if (t) invoke('go_forward', { tabId: t.id }); break;
+    case 'next-tab':     cycleTab(1); break;
+    case 'prev-tab':     cycleTab(-1); break;
     case 'show-sidebar': toggleSidebar(); break;
     case 'add-bookmark': toggleBookmark(); break;
   }
