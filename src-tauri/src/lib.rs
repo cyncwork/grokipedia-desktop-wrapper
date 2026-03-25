@@ -209,13 +209,23 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
             }
             if url.scheme() == "grokipedia-ext" {
                 let real_url = url.as_str().strip_prefix("grokipedia-ext:").unwrap_or("");
-                if !real_url.is_empty() {
+                // Only open http/https URLs in system browser
+                if real_url.starts_with("https://") || real_url.starts_with("http://") {
                     #[cfg(target_os = "macos")]
                     { let _ = std::process::Command::new("open").arg(real_url).spawn(); }
                     #[cfg(target_os = "linux")]
                     { let _ = std::process::Command::new("xdg-open").arg(real_url).spawn(); }
                 }
                 return false;
+            }
+            // Enforce HTTPS for allowed domains
+            if let Some(host) = url.host_str() {
+                let is_allowed = host == "grokipedia.com"
+                    || host.ends_with(".grokipedia.com")
+                    || host == "accounts.x.ai";
+                if is_allowed && url.scheme() != "https" {
+                    return false;
+                }
             }
             true
         })
