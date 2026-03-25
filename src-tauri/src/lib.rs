@@ -129,6 +129,7 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
     let tab_id_cb = tab_id.clone();
     let tab_id_nav = tab_id.clone();
     let app_nav = app.clone();
+    let app_onnav = app.clone();
 
     let builder = WebviewBuilder::new(&tab_id, WebviewUrl::External(parsed))
         // Use a real Safari UA so Cloudflare Turnstile and other bot
@@ -147,12 +148,15 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
                           || host === 'accounts.x.ai';
                     if (!ok) {
                         e.preventDefault();
-                        // Navigate to a sentinel URL that on_navigation will
-                        // intercept and open in the system browser.
                         window.location.href = 'grokipedia-ext:' + a.href;
                     }
                 } catch {}
             }, true);
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    window.location.href = 'grokipedia-cmd:exit-fullscreen';
+                }
+            });
         "#)
         // Intercept new-window requests (window.open / OAuth popups):
         // navigate the current webview instead of opening a popup.
@@ -164,7 +168,20 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
         })
         // Allow all navigation EXCEPT the sentinel scheme used by the
         // click interceptor to signal "open in system browser".
-        .on_navigation(|url| {
+        .on_navigation(move |url| {
+            if url.scheme() == "grokipedia-cmd" {
+                if url.path() == "exit-fullscreen" {
+                    if let Some(win) = app_onnav.get_window("main") {
+                        if win.is_fullscreen().unwrap_or(false) {
+                            #[cfg(target_os = "macos")]
+                            toggle_native_fullscreen(&win);
+                            #[cfg(not(target_os = "macos"))]
+                            { let _ = win.set_fullscreen(false); }
+                        }
+                    }
+                }
+                return false;
+            }
             if url.scheme() == "grokipedia-ext" {
                 let real_url = url.as_str().strip_prefix("grokipedia-ext:").unwrap_or("");
                 if !real_url.is_empty() {
@@ -269,6 +286,36 @@ fn reload_tab(app: AppHandle, tab_id: String) -> Result<(), String> {
         wv.eval("location.reload()").map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// ── Window commands ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn start_drag(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_window("main") {
+        win.start_dragging().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn exit_fullscreen(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_window("main") {
+        if win.is_fullscreen().unwrap_or(false) {
+            #[cfg(target_os = "macos")]
+            toggle_native_fullscreen(&win);
+            #[cfg(not(target_os = "macos"))]
+            { let _ = win.set_fullscreen(false); }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn toggle_native_fullscreen(win: &tauri::Window) {
+    use objc2_app_kit::NSWindow;
+    let ns_window: *mut NSWindow = win.ns_window().unwrap().cast();
+    unsafe { (*ns_window).toggleFullScreen(None) };
 }
 
 // ── Sidebar commands ──────────────────────────────────────────────────────────
@@ -504,6 +551,10 @@ pub fn run() {
                 .id("forward").accelerator("CmdOrCtrl+]").build(app)?;
             let panel_item = MenuItemBuilder::new("Bookmarks & History")
                 .id("show-sidebar").accelerator("CmdOrCtrl+Shift+L").build(app)?;
+            let fullscreen_item = MenuItemBuilder::new("Toggle Full Screen")
+                .id("toggle-fullscreen").accelerator("CmdOrCtrl+Ctrl+F").build(app)?;
+            let exit_fs_item = MenuItemBuilder::new("Exit Full Screen")
+                .id("exit-fullscreen").accelerator("Escape").build(app)?;
             let view_menu = SubmenuBuilder::new(app, "View")
                 .item(&reload_item)
                 .separator()
@@ -511,6 +562,9 @@ pub fn run() {
                 .item(&forward_item)
                 .separator()
                 .item(&panel_item)
+                .separator()
+                .item(&fullscreen_item)
+                .item(&exit_fs_item)
                 .build()?;
 
             let bookmark_item = MenuItemBuilder::new("Add Bookmark…")
@@ -529,6 +583,29 @@ pub fn run() {
             app.set_menu(menu)?;
 
             app.on_menu_event(|app, event| {
+                if event.id.0.as_str() == "exit-fullscreen" {
+                    if let Some(win) = app.get_window("main") {
+                        if win.is_fullscreen().unwrap_or(false) {
+                            #[cfg(target_os = "macos")]
+                            toggle_native_fullscreen(&win);
+                            #[cfg(not(target_os = "macos"))]
+                            { let _ = win.set_fullscreen(false); }
+                        }
+                    }
+                    return;
+                }
+                if event.id.0.as_str() == "toggle-fullscreen" {
+                    if let Some(win) = app.get_window("main") {
+                        #[cfg(target_os = "macos")]
+                        toggle_native_fullscreen(&win);
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            let is_fs = win.is_fullscreen().unwrap_or(false);
+                            let _ = win.set_fullscreen(!is_fs);
+                        }
+                    }
+                    return;
+                }
                 let target = tauri::EventTarget::Webview { label: "chrome".into() };
                 let action = match event.id.0.as_str() {
                     "new-tab"      => "new-tab",
@@ -548,6 +625,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             new_tab, close_tab, switch_tab, navigate_tab,
             go_back, go_forward, reload_tab,
+            start_drag, exit_fullscreen,
             open_sidebar, close_sidebar,
             add_history, get_history, clear_history,
             add_bookmark, get_bookmarks, delete_bookmark,
