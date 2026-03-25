@@ -272,7 +272,11 @@ listen('tab-navigated', ({ payload }) => {
   invoke('add_history', { url: payload.url, title: tab.title });
 });
 
-// ── Window dragging ──────────────────────────────────────────────────────────
+// ── Window dragging & fullscreen ──────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') invoke('exit_fullscreen');
+});
+
 document.querySelectorAll('.tl-spacer, .drag-spacer').forEach(el => {
   el.addEventListener('mousedown', e => {
     if (e.button === 0) invoke('start_drag');

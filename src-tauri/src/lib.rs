@@ -147,8 +147,11 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
     let tab_id_cb = tab_id.clone();
     let tab_id_nav = tab_id.clone();
     let app_nav = app.clone();
+    #[cfg(not(target_os = "macos"))]
+    let app_onnav = app.clone();
 
-    let builder = WebviewBuilder::new(&tab_id, WebviewUrl::External(parsed))
+    #[allow(unused_mut)]
+    let mut builder = WebviewBuilder::new(&tab_id, WebviewUrl::External(parsed))
         // Use a real Safari UA so Cloudflare Turnstile and other bot
         // detection don't reject the embedded WKWebView.
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15")
@@ -169,7 +172,21 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
                     }
                 } catch {}
             }, true);
-        "#)
+        "#);
+
+    // On Linux, inject Escape handler via JS since there's no native key monitor
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.initialization_script(r#"
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    window.location.href = 'grokipedia-cmd:exit-fullscreen';
+                }
+            }, true);
+        "#);
+    }
+
+    let builder = builder
         // Intercept new-window requests (window.open / OAuth popups):
         // navigate the current webview instead of opening a popup.
         .on_new_window(move |url, _features| {
@@ -181,6 +198,15 @@ fn new_tab(app: AppHandle, state: tauri::State<AppState>, url: String) -> Result
         // Allow all navigation EXCEPT the sentinel scheme used by the
         // click interceptor to signal "open in system browser".
         .on_navigation(move |url| {
+            #[cfg(not(target_os = "macos"))]
+            if url.as_str().starts_with("grokipedia-cmd:exit-fullscreen") {
+                if let Some(win) = app_onnav.get_window("main") {
+                    if win.is_fullscreen().unwrap_or(false) {
+                        let _ = win.set_fullscreen(false);
+                    }
+                }
+                return false;
+            }
             if url.scheme() == "grokipedia-ext" {
                 let real_url = url.as_str().strip_prefix("grokipedia-ext:").unwrap_or("");
                 if !real_url.is_empty() {

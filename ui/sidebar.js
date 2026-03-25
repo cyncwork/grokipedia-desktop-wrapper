@@ -145,6 +145,11 @@ function highlightItem(items, idx) {
 let focusedIdx = -1;
 
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    invoke('exit_fullscreen');
+    return;
+  }
+
   const items = getListItems();
 
   if (e.key === 'Tab') {
