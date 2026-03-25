@@ -11,6 +11,7 @@
     <div class="sidebar-tabs">
       <button class="sidebar-tab active" data-panel="bookmarks">Bookmarks</button>
       <button class="sidebar-tab"        data-panel="history">History</button>
+      <button class="sidebar-tab"        data-panel="settings">Settings</button>
     </div>
 
     <div id="panel-bookmarks" class="panel">
@@ -26,6 +27,18 @@
         <button id="btn-clear-history" class="text-btn">Clear</button>
       </div>
       <ul id="history-list"></ul>
+    </div>
+
+    <div id="panel-settings" class="panel hidden">
+      <div class="panel-toolbar">
+        <span class="panel-label">Settings</span>
+      </div>
+      <div class="settings-list">
+        <label class="setting-row">
+          <span>Restore tabs on relaunch</span>
+          <input type="checkbox" id="chk-restore-tabs" />
+        </label>
+      </div>
     </div>
   </div>
   <script src="sidebar.js"></script>

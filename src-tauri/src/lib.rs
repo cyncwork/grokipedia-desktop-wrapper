@@ -31,6 +31,14 @@ pub struct Bookmark {
     created_at: i64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SavedTab {
+    position: i32,
+    url: String,
+    title: String,
+    active: bool,
+}
+
 // ── App state ─────────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -62,6 +70,16 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             url        TEXT    NOT NULL,
             title      TEXT    NOT NULL DEFAULT '',
             created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS saved_tabs (
+            position INTEGER NOT NULL,
+            url      TEXT    NOT NULL,
+            title    TEXT    NOT NULL DEFAULT '',
+            active   INTEGER NOT NULL DEFAULT 0
         );",
     )
 }
@@ -434,6 +452,53 @@ fn delete_bookmark(state: tauri::State<AppState>, id: i64) -> Result<(), String>
     Ok(())
 }
 
+// ── Settings commands ─────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_setting(state: tauri::State<AppState>, key: String) -> Result<Option<String>, String> {
+    let db = state.db.lock().unwrap();
+    let mut stmt = db.prepare("SELECT value FROM settings WHERE key = ?1")
+        .map_err(|e| e.to_string())?;
+    let val = stmt.query_row(params![key], |row| row.get::<_, String>(0)).ok();
+    Ok(val)
+}
+
+#[tauri::command]
+fn set_setting(state: tauri::State<AppState>, key: String, value: String) -> Result<(), String> {
+    state.db.lock().unwrap()
+        .execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", params![key, value])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn save_tabs(state: tauri::State<AppState>, tabs: Vec<SavedTab>) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    db.execute("DELETE FROM saved_tabs", []).map_err(|e| e.to_string())?;
+    for t in &tabs {
+        db.execute(
+            "INSERT INTO saved_tabs (position, url, title, active) VALUES (?1, ?2, ?3, ?4)",
+            params![t.position, t.url, t.title, t.active as i32],
+        ).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_saved_tabs(state: tauri::State<AppState>) -> Result<Vec<SavedTab>, String> {
+    let db = state.db.lock().unwrap();
+    let mut stmt = db.prepare("SELECT position, url, title, active FROM saved_tabs ORDER BY position")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| Ok(SavedTab {
+        position: row.get(0)?,
+        url: row.get(1)?,
+        title: row.get(2)?,
+        active: row.get::<_, i32>(3)? != 0,
+    })).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -629,6 +694,7 @@ pub fn run() {
             open_sidebar, close_sidebar,
             add_history, get_history, clear_history,
             add_bookmark, get_bookmarks, delete_bookmark,
+            get_setting, set_setting, save_tabs, get_saved_tabs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Grokipedia");

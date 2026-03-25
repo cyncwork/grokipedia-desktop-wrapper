@@ -61,14 +61,26 @@ async function renderHistory() {
     </li>`).join('');
 }
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+async function renderSettings() {
+  const val = await invoke('get_setting', { key: 'restore_tabs' });
+  document.getElementById('chk-restore-tabs').checked = val !== '0';
+}
+
+document.getElementById('chk-restore-tabs').addEventListener('change', async (e) => {
+  await invoke('set_setting', { key: 'restore_tabs', value: e.target.checked ? '1' : '0' });
+});
+
 // ── Panel switching ───────────────────────────────────────────────────────────
 function showPanel(name) {
   document.querySelectorAll('.sidebar-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.panel === name));
   document.getElementById('panel-bookmarks').classList.toggle('hidden', name !== 'bookmarks');
   document.getElementById('panel-history').classList.toggle('hidden', name !== 'history');
+  document.getElementById('panel-settings').classList.toggle('hidden', name !== 'settings');
   if (name === 'bookmarks') renderBookmarks();
-  else renderHistory();
+  else if (name === 'history') renderHistory();
+  else if (name === 'settings') renderSettings();
 }
 
 document.querySelectorAll('.sidebar-tab').forEach(btn =>

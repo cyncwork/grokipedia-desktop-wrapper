@@ -91,6 +91,7 @@ tabsEl.addEventListener('pointerup', e => {
       const finalIdx = insertIdx > fromIdx ? insertIdx - 1 : insertIdx;
       state.tabs.splice(finalIdx, 0, moved);
       renderTabs();
+      saveTabs();
     }
   }
   drag = null;
@@ -116,6 +117,17 @@ function renderTabs() {
   updateBookmarkBtn();
 }
 
+// ── Tab persistence ──────────────────────────────────────────────────────────
+function saveTabs() {
+  const tabs = state.tabs.map((t, i) => ({
+    position: i,
+    url: t.url,
+    title: t.title || '',
+    active: t.id === state.activeTabId,
+  }));
+  invoke('save_tabs', { tabs });
+}
+
 // ── Tab actions ───────────────────────────────────────────────────────────────
 async function openTab(url = HOME) {
   try {
@@ -123,6 +135,7 @@ async function openTab(url = HOME) {
     state.tabs.push({ id, url, title: shortTitle(url) });
     state.activeTabId = id;
     renderTabs();
+    saveTabs();
     invoke('add_history', { url, title: shortTitle(url) });
   } catch (err) { console.error('new_tab:', err); }
 }
@@ -137,12 +150,14 @@ async function closeTab(tabId) {
     return;
   }
   renderTabs();
+  saveTabs();
 }
 
 async function switchTab(tabId) {
   await invoke('switch_tab', { tabId });
   state.activeTabId = tabId;
   renderTabs();
+  saveTabs();
 }
 
 async function navigateActive(url) {
@@ -152,6 +167,7 @@ async function navigateActive(url) {
   tab.url   = url;
   tab.title = shortTitle(url);
   renderTabs();
+  saveTabs();
   invoke('add_history', { url, title: tab.title });
 }
 
@@ -252,6 +268,7 @@ listen('tab-navigated', ({ payload }) => {
   tab.url   = payload.url;
   tab.title = shortTitle(payload.url);
   renderTabs();
+  saveTabs();
   invoke('add_history', { url: payload.url, title: tab.title });
 });
 
@@ -271,4 +288,23 @@ invoke('get_bookmarks').then(bms => {
   bms.forEach(b => bookmarkUrls.add(b.url));
   updateBookmarkBtn();
 });
-openTab(HOME);
+
+(async () => {
+  const setting = await invoke('get_setting', { key: 'restore_tabs' });
+  if (setting !== '0') {
+    const saved = await invoke('get_saved_tabs');
+    if (saved.length > 0) {
+      let activeId = null;
+      for (const t of saved) {
+        await openTab(t.url);
+        const tab = state.tabs[state.tabs.length - 1];
+        if (t.title) tab.title = t.title;
+        if (t.active) activeId = tab.id;
+      }
+      if (activeId) await switchTab(activeId);
+      renderTabs();
+      return;
+    }
+  }
+  openTab(HOME);
+})();
