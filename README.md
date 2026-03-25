@@ -9,8 +9,11 @@ Targets **macOS** and **Linux**.
 ## Features
 
 - Multi-tab browsing with shared cookie/session state
+- Drag-to-reorder tabs
+- Restore tabs on relaunch (optional, enabled by default)
 - Bookmarks and browsing history (stored locally in SQLite)
-- Sidebar panel for bookmarks & history
+- Sidebar panel for bookmarks, history, and settings
+- Native fullscreen with Escape to exit
 - Native keyboard shortcuts
 - External links open in your default browser
 - Single-row chrome bar — compact 40 px title bar with tabs, navigation, and controls
@@ -83,7 +86,7 @@ The built app will be at:
 
 - **Rust / Tauri 2** (`src-tauri/`) — window management, tab lifecycle, SQLite persistence
 - **Vanilla HTML/CSS/JS** (`ui/`) — no bundler, no framework
-- **SQLite** via `rusqlite` (bundled) — stores history and bookmarks locally
+- **SQLite** via `rusqlite` (bundled) — stores history, bookmarks, settings, and saved tabs locally
 
 ## Architecture
 
@@ -94,7 +97,7 @@ The main window is a bare `Window` with no webview of its own. The chrome UI and
 | `main` | Host window (no webview) |
 | `chrome` | Chrome bar — tabs, back/forward, bookmark, sidebar (`index.html`) |
 | `tab-N` | One per open tab, loads grokipedia.com pages |
-| `sidebar` | Child webview — bookmarks & history panel (`sidebar.html`) |
+| `sidebar` | Child webview — bookmarks, history & settings panel (`sidebar.html`) |
 
 All content webviews share the same WebKit data store, so cookies from `accounts.x.ai` persist across tabs automatically.
 
@@ -108,6 +111,8 @@ All content webviews share the same WebKit data store, so cookies from `accounts
 | Back / Forward | ⌘[ / ⌘] |
 | Bookmarks & History panel | ⌘⇧L |
 | Add/remove bookmark | ⌘D |
+| Toggle full screen | ⌃⌘F |
+| Exit full screen | Escape |
 
 ## Disclaimer
 
